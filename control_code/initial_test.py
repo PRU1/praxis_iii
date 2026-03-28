@@ -26,6 +26,7 @@ DEADBAND_C = 0.4
 #servo variables
 SERVO_CLOSE = 180
 SERVO_OPEN = 110
+SERVO_MIN = 70
 
 #geometry variables
 SIDE_ANGLES = {1:0, 2:90, 3:180, 4:270}
@@ -122,8 +123,9 @@ class ServoInit:
         self.open_angle = SERVO_OPEN
 
     def move(self, angle):
+        angle = clamp.angle(angle, SERVO_MIN, SERVO_CLOSE)
         self.servo.angle =angle
-
+        
     def set_fraction(self, fraction): #might delete later
         fraction = clamp(fraction, 0.0, 1.0)
         angle = self.closed_angle + (self.open_angle - self.closed_angle) * fraction

@@ -1,3 +1,12 @@
+"""
+File: initial_hall_effect_test.py
+
+Description:
+This module implements an initial test for the hall effect sensor.
+
+Author: Jadon Tsai
+Date: 2026-03-21
+"""
 import time
 import board
 import digitalio
@@ -7,7 +16,6 @@ hall.direction = digitalio.Direction.INPUT
 
 last_state = hall.value
 
-print("AH372 ready")
 print("OUT =", "HIGH" if last_state else "LOW")
 
 while True:

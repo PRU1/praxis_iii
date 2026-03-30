@@ -1,3 +1,14 @@
+"""
+File: PID_controller.py
+
+Description:
+This is the functional python code for our PID controller.
+
+Author: Jadon Tsai
+Revisions by: Jeffery Tian and Pranav Upreti
+Date: 2026-03-24
+"""
+
 import time
 import math
 import board
@@ -16,7 +27,8 @@ MOTOR_PIN_2 = board.GP5
 MOTOR_PIN_3 = board.GP9
 MOTOR_PIN_4 = board.GP14
 i2c = busio.I2C(board.GP17, board.GP16)
-#i2c_indoor = busio.I2C(board.GP6, board.GP7)#need this bc we have two temp sensors
+i2c_indoor = busio.I2C(board.GP6, board.GP7)
+#we need this because we have two temp sensors
 
 #ctrl variables
 TARGET_APPARENT_C = 23.0
@@ -34,13 +46,16 @@ WIND_SPEED_FRAC = 0.3
 
 
 def apparent_temperature_c(temp_c, rh_percent, wind_m_s):
-    #Australian apparent temperature calculation
+    """
+    Australian apparent temperature calculation
+    """
     rh = rh_percent / 100.0 #humidity
     vapor_pressure_hpa = rh * 6.105 * math.exp((17.27 * temp_c) / (237.7 + temp_c))
     return temp_c + 0.33 * vapor_pressure_hpa - 0.70 * wind_m_s - 4.0
 
 #helper functions
 def clamp(x, lo, hi):
+    #clamps values, useful for overflow protection, especially in a physical system
     if x < lo:
         return lo
     if x > hi:
@@ -48,15 +63,23 @@ def clamp(x, lo, hi):
     return x
 
 def circular_diff_deg(a, b):
+    #degree difference, useful for seeing how much of a wall is affected by wind
     d = (a - b + 180.0) % 360.0 - 180.0
     return d
 
 def side_exposure(side_deg, wind_from):
+    """
+    measures how much each wall is exposed to the relative wind,
+    useful for informing decisions on opening windows
+    """
     diff = abs(circular_diff_deg(side_deg, wind_from))
     return (math.cos(math.radians(diff))+1)/2.0
 
-#mode check
 def ventilation_mode(indoor_at, outdoor_at, target_at, deadband):
+    """
+    checking if we should open the windows to 
+    "warm" the house, if the user defines that to be the desired behaviour
+    """
     if indoor_at > target_at + deadband:
         if outdoor_at < indoor_at:
             return "cool"
@@ -70,6 +93,7 @@ def ventilation_mode(indoor_at, outdoor_at, target_at, deadband):
     return "hold"
 
 class PID:
+    #standard PID controller, further description available in documentation
     def __init__(self, kp, ki, kd, out_min=0.0, out_max=1.0, int_min = 0, int_max = 10):
         self.kp = kp
         self.ki = ki
@@ -116,6 +140,9 @@ class PID:
 
 
 class ServoInit:
+    """
+    Movement code for each individual servo. 
+    """
     def __init__(self, pin):
         self.pwm = pwmio.PWMOut(pin, duty_cycle=2**15, frequency=50)
         self.servo = servo.Servo(self.pwm)
@@ -126,12 +153,17 @@ class ServoInit:
         angle = clamp(angle, SERVO_MIN, SERVO_CLOSE)
         self.servo.angle =angle
         
-    def set_fraction(self, fraction): #might delete later
+    def set_fraction(self, fraction):
         fraction = clamp(fraction, 0.0, 1.0)
         angle = self.closed_angle + (self.open_angle - self.closed_angle) * fraction
         self.move(angle)
 
 class ServoControl:
+    """
+    Our servo control code. "calibrate" is used if we have to disconnect
+    the servo arms, so that we have a fixed reference point to reconnect them 
+    to to get predictable motion.
+    """
     def __init__(self):
         self.set = {1: ServoInit(MOTOR_PIN_1),
                     2: ServoInit(MOTOR_PIN_2), 
@@ -147,6 +179,12 @@ class ServoControl:
             self.set[side].move(SERVO_CLOSE)
 
 class WindSpeedSensor:
+    """
+    Code for an anemometer based on a hall effect sensor.
+    It counts ticks on falling edges, and converts rotational
+    frequency to linear speed based on our own calibrated
+    conversion factors.
+    """
     def __init__(self, pin):
         self.hall = digitalio.DigitalInOut(pin)
         self.hall.direction = digitalio.Direction.INPUT
@@ -177,10 +215,18 @@ class WindSpeedSensor:
 
 
 class WindDirectionSensor:
+    """
+    Code for the wind direction sensor, based on an as726x colour sensor.
+    The colour sensor does not read colour that well, so we have a calibration
+    table. We then dot product the result and table, which then finds the 
+    wind direction relative to a calibrated fixed point.
+    This is used to inform which window opens.
+    """
     def __init__(self):
-        # i2c = board.STEMMA_I2C()  # For using the built-in STEMMA QT connector on a microcontroller
+        
         self.sensor = AS726x_I2C(i2c)
         self.sensor.conversion_mode = self.sensor.MODE_2
+        #our conversion table
         self.readings = [[61.2825, 83.7207, 101.519, 222.273, 337.877, 29.581],
             [95.6008, 170.542, 178.119, 202.24, 200.319, 24.848],
             [79.6673, 93.023, 84.9066, 95.3963, 105.748, 21.2983],
@@ -221,6 +267,11 @@ class WindDirectionSensor:
         return angle
 
 class TemperatureSensor:
+    """
+    Code for the am2320 temperature sensor, works with I2C
+    As we have 2, we would need 2 I2C modules, which is why we don't
+    hardcode the i2c value
+    """
     def __init__(self, i2c):
         self.sensor = adafruit_am2320.AM2320(i2c)
 
@@ -234,8 +285,10 @@ class TemperatureSensor:
             print("Read error:", repr(e))
             return None, None
         
-#fix depending on granularity
 def choose_window_openings(total_open, wind_from_deg):
+    """
+    Looks at the wind direction to pick which windows to open
+    """
     exposures = {
         side: side_exposure(angle, wind_from_deg)
         for side, angle in SIDE_ANGLES.items()
@@ -275,6 +328,10 @@ class ActualController:
             integral_max=10.0,
         )
     def step(self):
+        """
+        Runs at each user defined step, compares control data 
+        to arrive at result on what to do, and then does it.
+        """
         indoor_temp, indoor_humid = (30, 30)
         outdoor_temp, outdoor_humid = (20, 20)
 
@@ -284,7 +341,7 @@ class ActualController:
         wind_speed = 5
         wind_from_deg = self.wind_direction_sensor.read_features()
 
-        indoor_air_speed = 5 #need a number here
+        indoor_air_speed = 1
         outdoor_air_speed = 5
         indoor_at = apparent_temperature_c(indoor_temp, indoor_humid, indoor_air_speed)
         outdoor_at = apparent_temperature_c(outdoor_temp, outdoor_humid, outdoor_air_speed)
@@ -316,6 +373,9 @@ class ActualController:
         print("========================================================")
 
 def main():
+    """
+    Set up and calling the controller
+    """
     inside_temp_sens = 0
     outside_temp_sens = 0
     wind_speed_sens = WindSpeedSensor(HALL_PIN)
@@ -328,7 +388,7 @@ def main():
                                       wind_direction_sensor = wind_direction_sens,
                                       servo_controller=servo_controller1)
     
-    servo_controller1.calibrate()#close if broken
+    servo_controller1.calibrate()
     last_control = time.monotonic()
     while True:
         wind_speed_sens.update()

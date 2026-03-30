@@ -1,3 +1,14 @@
+"""
+File: initial_temp_humid_sensor_test.py
+
+Description:
+This module implements an initial test for the AM2320 temperature
+and humidity sensor.
+
+Author: Jadon Tsai
+Date: 2026-03-24
+"""
+
 import time
 import board
 import busio

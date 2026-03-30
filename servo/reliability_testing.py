@@ -9,6 +9,11 @@ servo_motor1 = servo.Servo(pwm1)
 
 
 def testing():
+    """
+    This function is designed to simulate opening and closing of the 
+    motor 100 times, at both extreme angles (note that this is different
+    than the original code as we made slight modifications to the servo arm.
+    """
     for i in range(99):
         servo_motor1.angle = 40
         time.sleep(1)

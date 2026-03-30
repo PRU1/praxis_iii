@@ -12,11 +12,11 @@ import adafruit_am2320
 #pins
 HALL_PIN = board.GP15
 MOTOR_PIN_1 = board.GP0
-MOTOR_PIN_2 = board.GP1
-MOTOR_PIN_3 = board.GP2
-MOTOR_PIN_4 = board.GP3
-i2c = busio.I2C(board.GP4, board.GP5)
-i2c_indoor = busio.I2C(board.GP6, board.GP7)#need this bc we have two temp sensors
+MOTOR_PIN_2 = board.GP5
+MOTOR_PIN_3 = board.GP9
+MOTOR_PIN_4 = board.GP14
+i2c = busio.I2C(board.GP17, board.GP16)
+#i2c_indoor = busio.I2C(board.GP6, board.GP7)#need this bc we have two temp sensors
 
 #ctrl variables
 TARGET_APPARENT_C = 23.0
@@ -123,7 +123,7 @@ class ServoInit:
         self.open_angle = SERVO_OPEN
 
     def move(self, angle):
-        angle = clamp.angle(angle, SERVO_MIN, SERVO_CLOSE)
+        angle = clamp(angle, SERVO_MIN, SERVO_CLOSE)
         self.servo.angle =angle
         
     def set_fraction(self, fraction): #might delete later
@@ -177,11 +177,48 @@ class WindSpeedSensor:
 
 
 class WindDirectionSensor:
-    def __init__(self, sensor):
-        pass
+    def __init__(self):
+        # i2c = board.STEMMA_I2C()  # For using the built-in STEMMA QT connector on a microcontroller
+        self.sensor = AS726x_I2C(i2c)
+        self.sensor.conversion_mode = self.sensor.MODE_2
+        self.readings = [[61.2825, 83.7207, 101.519, 222.273, 337.877, 29.581],
+            [95.6008, 170.542, 178.119, 202.24, 200.319, 24.848],
+            [79.6673, 93.023, 84.9066, 95.3963, 105.748, 21.2983],
+            [41.6721, 25.8397, 20.3038, 21.9411, 26.6518, 26.0313],
+            [34.3182, 19.6382, 19.3809, 23.8491, 33.5297, 31.9475],
+            [28.19, 19.6382, 22.1496, 40.0664, 58.4621, 26.0313],
+            [24.513, 20.6718, 28.6098, 86.8106, 144.436, 28.3977],
+            [30.6413, 28.9405, 44.2991, 157.404, 297.469, 26.0313]]
+        
+    def dotProductLength6(self, a, b):
+        value = 0
+        for i in range(6):
+            value = value + a[i]*b[i]
+        return value
+    
+    def getSimilarity(self, a, bs):
+        max = -1;
+        ind = 0;
+        for i in range(len(bs)):
+            b = bs[i];
+            similarity = self.dotProductLength6(a, b) / (self.dotProductLength6(a, a)*self.dotProductLength6(b, b))**0.5
+            if similarity > max:
+                max = similarity
+                ind = i
+        return ind
+    
+    def getangle(self):
+        list = [self.sensor.blue, self.sensor.green, self.sensor.yellow, self.sensor.orange, self.sensor.red, self.sensor.violet]
+        print(list)
+        angle = self.getSimilarity(list, self.readings) * 45
+        return angle
 
     def read_features(self):
-        return 0
+        while not self.sensor.data_ready:
+            time.sleep(0.1)
+        angle = self.getangle()
+        time.sleep(2)
+        return angle
 
 class TemperatureSensor:
     def __init__(self, i2c):
@@ -221,10 +258,11 @@ def choose_window_openings(total_open, wind_from_deg):
     return temp_set, windward, leeward
 
 class ActualController:
-    def __init__(self, indoor_sensor, outdoor_sensor, wind_speed_sensor, servo_controller):
+    def __init__(self, indoor_sensor, outdoor_sensor, wind_speed_sensor, wind_direction_sensor, servo_controller):
         self.indoor_sensor = indoor_sensor
         self.outdoor_sensor = outdoor_sensor
         self.wind_speed_sensor = wind_speed_sensor
+        self.wind_direction_sensor = wind_direction_sensor
         self.servo_controller = servo_controller
         self.target_at = TARGET_APPARENT_C
         self.vent_pid = PID(
@@ -233,21 +271,21 @@ class ActualController:
             kd=0.02,
             out_min=0.0,
             out_max=1.0,
-            integral_min=-5.0,
-            integral_max=5.0,
+            integral_min=-10.0,
+            integral_max=10.0,
         )
     def step(self):
-        indoor_temp, indoor_humid = self.indoor_sensor.read()
-        outdoor_temp, outdoor_humid = self.outdoor_sensor.read()
+        indoor_temp, indoor_humid = (30, 30)
+        outdoor_temp, outdoor_humid = (20, 20)
 
         if None in (indoor_temp, indoor_humid, outdoor_temp, outdoor_humid):
             print("Sensor missed")
             return    
-        wind_speed = self.wind_speed_sensor.read_mps()
-        wind_from_deg = 0
+        wind_speed = 5
+        wind_from_deg = self.wind_direction_sensor.read_features()
 
-        indoor_air_speed = wind_speed*WIND_SPEED_FRAC #need a number here
-        outdoor_air_speed = wind_speed
+        indoor_air_speed = 5 #need a number here
+        outdoor_air_speed = 5
         indoor_at = apparent_temperature_c(indoor_temp, indoor_humid, indoor_air_speed)
         outdoor_at = apparent_temperature_c(outdoor_temp, outdoor_humid, outdoor_air_speed)
         
@@ -278,14 +316,16 @@ class ActualController:
         print("========================================================")
 
 def main():
-    inside_temp_sens = TemperatureSensor(i2c_indoor)
-    outside_temp_sens = TemperatureSensor(i2c)
+    inside_temp_sens = 0
+    outside_temp_sens = 0
     wind_speed_sens = WindSpeedSensor(HALL_PIN)
+    wind_direction_sens = WindDirectionSensor()
     servo_controller1 = ServoControl()
 
     pid_controller = ActualController(indoor_sensor=inside_temp_sens,
                                       outdoor_sensor=outside_temp_sens,
                                       wind_speed_sensor=wind_speed_sens,
+                                      wind_direction_sensor = wind_direction_sens,
                                       servo_controller=servo_controller1)
     
     servo_controller1.calibrate()#close if broken
@@ -303,3 +343,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

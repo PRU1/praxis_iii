@@ -1,14 +1,16 @@
+"""
+File: initial_colour_sensor_test.py
+
+Description:
+This module tests the functionality of an as726x colour sensor.
+
+Author: Jadon Tsai
+Date: 2026-03-16
+"""
 import time
 import board
 import busio
 from adafruit_as726x import AS726x_I2C
-
-#Graph scaling (for later)
-max_val = 16000
-max_graph = 80
-
-def graph_map(x):
-    return min(int(x * max_graph / max_val), max_graph)
 
 #create I2C on Pico pins CHANGE PINS HERE IF YOURE USING A DIFFERENT PIN
 i2c = busio.I2C(board.GP1, board.GP0)
@@ -23,14 +25,11 @@ i2c.unlock()
 sensor = AS726x_I2C(i2c)
 
 sensor.conversion_mode = sensor.MODE_2
-#turns lights on, kinda bright rn
+#turns lights on
 sensor.driver_led = True
 sensor.indicator_led = True
 
-print("AS7262 ready")
-
 while True:
-
     while not sensor.data_ready:
         time.sleep(0.05)
 
